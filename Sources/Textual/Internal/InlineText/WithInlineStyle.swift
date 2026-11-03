@@ -13,13 +13,11 @@ import SwiftUI
 // The view reads `InlineStyle` and `TextEnvironmentValues` from the environment, then produces a
 // styled copy of the attributed string by merging attributes into each matching span.
 //
-// Styling is recomputed whenever the input, style, or environment snapshot changes.
+// Styling uses the current input, style, and environment snapshot.
 
 struct WithInlineStyle<Content: View>: View {
   @Environment(\.inlineStyle) private var style
   @Environment(\.textEnvironment) private var environment
-
-  @State private var output: AttributedString?
 
   private let input: AttributedString
   private let content: (AttributedString) -> Content
@@ -33,24 +31,18 @@ struct WithInlineStyle<Content: View>: View {
   }
 
   var body: some View {
-    content(output ?? AttributedString())
-      .onChange(of: Tuple(input, style, environment), initial: true) { _, newValue in
-        resolve(
-          attributedString: newValue.values.0,
-          style: newValue.values.1,
-          in: newValue.values.2
-        )
-      }
+    content(resolve(attributedString: input, style: style, in: environment))
   }
 
   private func resolve(
     attributedString: AttributedString,
     style: InlineStyle,
     in environment: TextEnvironmentValues
-  ) {
+  ) -> AttributedString {
     var output = attributedString
 
     for run in attributedString.runs {
+      guard run.inlinePresentationIntent != nil || run.link != nil else { continue }
       var attributes = AttributeContainer()
 
       if let intent = run.inlinePresentationIntent {
@@ -78,6 +70,6 @@ struct WithInlineStyle<Content: View>: View {
       output[run.range].mergeAttributes(attributes, mergePolicy: .keepNew)
     }
 
-    self.output = output
+    return output
   }
 }

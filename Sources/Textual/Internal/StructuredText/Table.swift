@@ -68,17 +68,20 @@ extension StructuredText {
         indentationLevel: indentationLevel
       )
       let resolvedStyle = tableStyle.resolve(configuration: configuration)
-        .onPreferenceChange(TableCell.SpacingKey.self) { @MainActor in
+      if tableStyle is OverflowTableStyle {
+        return AnyView(resolvedStyle)
+      }
+      return AnyView(
+        resolvedStyle.onPreferenceChange(TableCell.SpacingKey.self) { @MainActor in
           spacing = $0
-        }
-
-      return AnyView(resolvedStyle)
+        })
     }
 
     @ViewBuilder
     private var label: some View {
       let rowRuns = content.blockRuns(parent: intent)
 
+      let spacing = tableStyle is OverflowTableStyle ? OverflowTableStyle.cellSpacing : self.spacing
       Grid(horizontalSpacing: spacing.horizontal, verticalSpacing: spacing.vertical) {
         ForEach(rowRuns.indices, id: \.self) { rowIndex in
           let rowRun = rowRuns[rowIndex]

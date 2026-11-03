@@ -6,6 +6,7 @@ extension StructuredText {
   /// Use ``TextualNamespace/overflowMode(_:)`` to switch between scrolling and wrapping.
   public struct OverflowTableStyle: TableStyle {
     private static let borderWidth: CGFloat = 1
+    static let cellSpacing = TableCell.Spacing(horizontal: borderWidth, vertical: borderWidth)
 
     private let relativeWidth: CGFloat
 
@@ -56,7 +57,6 @@ extension StructuredText {
           }
           .padding(Self.borderWidth)
       }
-      .textual.tableCellSpacing(horizontal: Self.borderWidth, vertical: Self.borderWidth)
       .textual.blockSpacing(.fontScaled(top: 1.6, bottom: 1.6))
     }
   }

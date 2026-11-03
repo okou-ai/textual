@@ -36,6 +36,24 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
   }
 
   var body: some View {
+    let attachments = content.attachments()
+    if attachments.isEmpty {
+      if content.runs.contains(where: { $0.link != nil }) {
+        TextBuilder.textWithoutAttachments(content, environment: textEnvironment)
+          .customAttribute(TextFragmentAttribute())
+          .modifier(TextSelectionBackground())
+          .modifier(TextLinkInteraction())
+      } else {
+        Text(AttributedString(content[content.startIndex..<content.endIndex]))
+          .customAttribute(TextFragmentAttribute())
+          .modifier(TextSelectionBackground())
+      }
+    } else {
+      attachmentText(attachments)
+    }
+  }
+
+  private func attachmentText(_ attachments: Set<AnyAttachment>) -> some View {
     text
       .customAttribute(TextFragmentAttribute())
       .onGeometryChange(for: CGSize?.self, of: \.textContainerSize) { size in
@@ -46,7 +64,7 @@ struct TextFragment<Content: AttributedStringProtocol>: View {
         self.textBuilder = TextBuilder(newValue, environment: textEnvironment)
       }
       .modifier(TextSelectionBackground())
-      .modifier(AttachmentOverlay(attachments: content.attachments()))
+      .modifier(AttachmentOverlay(attachments: attachments))
       .modifier(TextLinkInteraction())
   }
 

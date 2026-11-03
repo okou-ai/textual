@@ -105,7 +105,8 @@ public struct StructuredText: View {
   @State private var attributedString = AttributedString()
 
   private let markup: String
-  private let parser: any MarkupParser
+  private let parser: (any MarkupParser)?
+  private let prepared: AttributedString?
 
   /// Creates a structured-text view by parsing `markup` with a custom parser.
   ///
@@ -113,10 +114,18 @@ public struct StructuredText: View {
   public init(_ markup: String, parser: any MarkupParser) {
     self.markup = markup
     self.parser = parser
+    self.prepared = nil
+  }
+
+  /// Displays already parsed Markdown with the normal layout and text selection.
+  public init(prepared content: AttributedString) {
+    self.markup = ""
+    self.parser = nil
+    self.prepared = content
   }
 
   public var body: some View {
-    WithAttachments(attributedString) {
+    WithAttachments(prepared ?? attributedString) {
       BlockContent(content: $0)
         .modifier(TextSelectionInteraction())
         .modifier(TextSelectionCoordination())
@@ -130,6 +139,7 @@ public struct StructuredText: View {
   }
 
   private func markupDidChange(_ markup: String) {
+    guard let parser else { return }
     self.attributedString = (try? parser.attributedString(for: markup)) ?? .init()
   }
 }

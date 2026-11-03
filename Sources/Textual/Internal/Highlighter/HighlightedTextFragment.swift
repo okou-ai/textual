@@ -1,27 +1,18 @@
 import SwiftUI
+import Synchronization
 
-// MARK: - Overview
-//
-// HighlightedTextFragment displays syntax-highlighted code using a two-phase approach.
-// Tokenization runs asynchronously and is keyed by content, while highlighting runs
-// synchronously on token or environment changes (theme, color scheme, dynamic type).
-//
-// The presentationIntent is preserved after highlighting so pasteboard formatters can
-// reconstruct the block structure when copying code.
-
+// Styling belongs to the code block rather than to a transient hosting view.
 struct HighlightedTextFragment: View {
   @Environment(\.textEnvironment) private var textEnvironment
-
-  @State private var model = Model()
+  @Environment(\.codeHighlightCache) private var cache
+  @State private var highlighted: (StructuredText.CodeHighlightCache.Key, AttributedString)?
 
   private let content: AttributedSubstring
   private let languageHint: String?
   private let theme: StructuredText.HighlighterTheme
 
   init(
-    _ content: AttributedSubstring,
-    languageHint: String?,
-    theme: StructuredText.HighlighterTheme
+    _ content: AttributedSubstring, languageHint: String?, theme: StructuredText.HighlighterTheme
   ) {
     self.content = content
     self.languageHint = languageHint
@@ -29,65 +20,105 @@ struct HighlightedTextFragment: View {
   }
 
   var body: some View {
-    TextFragment(model.highlightedCode ?? AttributedString(content))
+    let key = StructuredText.CodeHighlightCache.Key(
+      content: AttributedString(content), language: languageHint, theme: theme,
+      environment: textEnvironment)
+    let rendered =
+      highlighted.flatMap { $0.0 == key ? $0.1 : nil }
+      ?? cache?.cached(key) ?? key.content
+    TextFragment(rendered)
       .foregroundStyle(theme.foregroundColor)
-      .task(id: content) {
-        await model.tokenize(
-          content: content,
-          languageHint: languageHint
-        )
-      }
-      .onChange(of: Tuple(model.tokens, textEnvironment)) { _, newValue in
-        model.highlight(
-          tokens: newValue.values.0,
-          presentationIntent: content.presentationIntent,
-          using: theme,
-          environment: newValue.values.1
-        )
+      .task(id: key) {
+        guard cache?.cached(key) == nil else { return }
+        let value: AttributedString
+        if let cache {
+          value = await cache.highlight(key)
+        } else {
+          value = await StructuredText.CodeHighlightCache.render(key)
+        }
+        guard !Task.isCancelled else { return }
+        highlighted = (key, value)
       }
   }
 }
 
-extension HighlightedTextFragment {
-  @MainActor @Observable final class Model {
-    var tokens: [CodeToken] = []
-    var highlightedCode: AttributedString?
+extension StructuredText {
+  /// Reuses code styling across views that share a document or workspace lifecycle.
+  public actor CodeHighlightCache {
+    public init() {}
 
-    func tokenize(content: AttributedSubstring, languageHint: String?) async {
-      let code = String(content.characters[...])
-      tokens = [CodeToken(content: code, type: .plain)]
-
-      if let tokenizer = CodeTokenizer.shared, let languageHint {
-        tokens = await tokenizer.tokenize(code: code, language: languageHint)
-      }
+    struct Key: Hashable, Sendable {
+      let content: AttributedString
+      let language: String?
+      let theme: StructuredText.HighlighterTheme
+      let environment: TextEnvironmentValues
     }
 
-    func highlight(
-      tokens: [CodeToken],
-      presentationIntent: PresentationIntent?,
-      using theme: StructuredText.HighlighterTheme,
-      environment: TextEnvironmentValues
-    ) {
-      var attributes = AttributeContainer()
-      // Re-apply the presentation intent for pasteboard formatters
-      attributes.presentationIntent = presentationIntent
-      ForegroundColorProperty(theme.foregroundColor)
-        .apply(in: &attributes, environment: environment)
-      var highlightedCode = AttributedString()
+    private struct Storage: Sendable {
+      var values: [Key: AttributedString] = [:]
+      var order: [Key] = []
+    }
+    private let storage = Mutex(Storage())
+    private var pending: [Key: Task<AttributedString, Never>] = [:]
 
+    nonisolated func cached(_ key: Key) -> AttributedString? {
+      storage.withLock { $0.values[key] }
+    }
+
+    func highlight(_ key: Key) async -> AttributedString {
+      if let cached = cached(key) { return cached }
+      if let existing = pending[key] { return await existing.value }
+      let task = Task { await Self.render(key) }
+      pending[key] = task
+      let result = await task.value
+      pending.removeValue(forKey: key)
+      if key.content.characters.prefix(16_385).count <= 16_384 {
+        storage.withLock { storage in
+          storage.values[key] = result
+          storage.order.append(key)
+          if storage.order.count > 32 {
+            storage.values.removeValue(forKey: storage.order.removeFirst())
+          }
+        }
+      }
+      return result
+    }
+
+    fileprivate static func render(_ key: Key) async -> AttributedString {
+      let code = String(key.content.characters)
+      let tokens: [CodeToken]
+      if let tokenizer = CodeTokenizer.shared, let language = key.language {
+        tokens = await tokenizer.tokenize(code: code, language: language)
+      } else {
+        tokens = [CodeToken(content: code, type: .plain)]
+      }
+
+      var attributes = AttributeContainer()
+      // Pasteboard formatters use the original intent to reconstruct the code block.
+      attributes.presentationIntent = key.content.presentationIntent
+      ForegroundColorProperty(key.theme.foregroundColor)
+        .apply(in: &attributes, environment: key.environment)
+      var highlighted = AttributedString()
       for token in tokens {
         var content = AttributedString(token.content)
         var tokenAttributes = attributes
-
-        if let tokenProperties = theme.tokenProperties[token.type] {
-          tokenProperties.apply(in: &tokenAttributes, environment: environment)
-        }
-
+        key.theme.tokenProperties[token.type]?.apply(
+          in: &tokenAttributes, environment: key.environment)
         content.mergeAttributes(tokenAttributes)
-        highlightedCode.append(content)
+        highlighted.append(content)
       }
-
-      self.highlightedCode = highlightedCode
+      return highlighted
     }
+  }
+}
+
+extension EnvironmentValues {
+  @Entry var codeHighlightCache: StructuredText.CodeHighlightCache? = nil
+}
+
+extension TextualNamespace where Base: View {
+  /// Shares prepared syntax highlighting between code blocks in this view subtree.
+  public func codeHighlightCache(_ cache: StructuredText.CodeHighlightCache) -> some View {
+    base.environment(\.codeHighlightCache, cache)
   }
 }
