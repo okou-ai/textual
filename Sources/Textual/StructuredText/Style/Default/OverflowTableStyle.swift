@@ -16,7 +16,7 @@ extension StructuredText {
       self.relativeWidth = relativeWidth
     }
 
-    func preparedBody(
+    @MainActor func preparedBody(
       _ layout: PreparedTableLayout, @ViewBuilder content: @escaping () -> some View
     ) -> some View {
       Overflow {
