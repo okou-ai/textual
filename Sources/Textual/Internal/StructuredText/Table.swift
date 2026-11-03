@@ -10,6 +10,8 @@ import SwiftUI
 extension StructuredText {
   struct Table: View {
     @Environment(\.tableStyle) private var tableStyle
+    @Environment(\.tableCellStyle) private var tableCellStyle
+    @Environment(\.preparedTables) private var preparedTables
 
     @State private var spacing = TableCell.Spacing()
 
@@ -28,6 +30,39 @@ extension StructuredText {
     }
 
     var body: some View {
+      if !preparedTables.isEmpty, let overflow = tableStyle as? OverflowTableStyle,
+        let layout = preparedTables[AttributedString(content)]
+      {
+        overflow.preparedBody(layout) {
+          ZStack(alignment: .topLeading) {
+            ForEach(layout.cells.indices, id: \.self) { index in
+              let cell = layout.cells[index]
+              preparedCell(cell)
+                .frame(
+                  width: cell.frame.width, height: cell.frame.height,
+                  alignment: Alignment(horizontal: alignment(for: cell.column), vertical: .center)
+                )
+                .offset(x: cell.frame.minX, y: cell.frame.minY)
+            }
+          }
+        }
+      } else {
+        originalBody
+      }
+    }
+
+    private func preparedCell(_ cell: PreparedTableLayout.Cell) -> some View {
+      let label = Text(AttributedString(cell.content))
+        .customAttribute(TextFragmentAttribute())
+        .modifier(TextSelectionBackground())
+      let configuration = TableCellStyleConfiguration(
+        label: .init(label),
+        indentationLevel: cell.content.presentationIntent?.indentationLevel ?? 0,
+        row: cell.row, column: cell.column)
+      return AnyView(tableCellStyle.resolve(configuration: configuration))
+    }
+
+    private var originalBody: some View {
       let configuration = TableStyleConfiguration(
         label: .init(label),
         indentationLevel: indentationLevel
@@ -37,7 +72,7 @@ extension StructuredText {
           spacing = $0
         }
 
-      AnyView(resolvedStyle)
+      return AnyView(resolvedStyle)
     }
 
     @ViewBuilder

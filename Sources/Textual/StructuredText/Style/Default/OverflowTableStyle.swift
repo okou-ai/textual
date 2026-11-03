@@ -16,6 +16,26 @@ extension StructuredText {
       self.relativeWidth = relativeWidth
     }
 
+    func preparedBody(
+      _ layout: PreparedTableLayout, @ViewBuilder content: @escaping () -> some View
+    ) -> some View {
+      Overflow {
+        content()
+          .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
+          .overlay {
+            Canvas { context, _ in
+              for divider in layout.dividers {
+                context.fill(Path(divider), with: .style(DynamicColor.grayTertiary))
+              }
+            }
+            .allowsHitTesting(false)
+          }
+          .frame(width: layout.contentWidth, alignment: .leading)
+          .padding(Self.borderWidth)
+      }
+      .textual.blockSpacing(.fontScaled(top: 1.6, bottom: 1.6))
+    }
+
     public func makeBody(configuration: Configuration) -> some View {
       Overflow { state in
         let maxWidth = state.containerWidth.map {
